@@ -1,5 +1,5 @@
-from libs.swap_router import swap_router
-from libs.initial_mapper import greedy_initial_mapping
+from swap_router import swap_router
+from initial_mapper import greedy_initial_mapping
 from qiskit import QuantumCircuit
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passes import Optimize1qGates, CommutativeCancellation, Unroll3qOrMore

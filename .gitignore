@@ -1,2 +1,4 @@
 /.vscode
 /logs
+/libs/__pycache__
+*.code-workspace
