@@ -1,4 +1,5 @@
 /.vscode
 /logs
 /libs/__pycache__
+/model/
 *.code-workspace
