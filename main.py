@@ -16,17 +16,17 @@ def train():
 		GeneralTargetState(target_state_name=TargetStateName.UNIFORM_SUPERPOSITION, num_qubits=5)
 	]
 
-	total_timesteps = 600000
-	eval_frequency = total_timesteps // 10
-	eval_episode = 50
-	agent = QuantumnAgent(general_target_state_list, 
-						total_timesteps=total_timesteps,
-						eval_frequency=eval_frequency,
-						eval_episode=eval_episode,
-						training_mode=True, 
-						verbose=1,
-						is_curriculum=True,
-						use_alp=True)
+	total_timesteps = 3000
+	eval_frequency = total_timesteps // 30
+	eval_episode = 30
+	QuantumnAgent(general_target_state_list, 
+					total_timesteps=total_timesteps,
+					eval_frequency=eval_frequency,
+					eval_episode=eval_episode,
+					training_mode=True, 
+					verbose=1,
+					is_curriculum=True,
+					use_alp=True)
  
 if __name__ == "__main__":
 	utils.clean_log()

@@ -12,12 +12,49 @@ from typing import Union
 
 
 class QuantumStatePreparation(gym.Env):
+	"""
+	This is a custom Gymnasium environment for training a reinforcement learning agent to
+	prepare a specific quantum state. The agent learns to apply a sequence of quantum gates
+	to an initial state to transform it into the desired target state.
+
+	The state is represented by Pauli expectation values of the current circuit state
+	and meta information like fidelity and remaining gates. The actions are a discrete set of
+	quantum gates (H, CX, X, Z) applied to specific qubits.
+
+	Attributes:
+		metadata (dict): Gymnasium environment metadata.
+		target_states_list (list): A list of possible target states for the agent to prepare.
+		current_gates_count (int): The number of gates applied in the current episode.
+		current_fidelity (float): The current fidelity of the circuit state compared to the target state.
+		previous_fidelity (float): The fidelity from the previous step.
+		base_gates (list): A list of the basic gate classes available to the agent.
+		max_env_qubits (int): The maximum number of qubits the environment can handle.
+		max_env_gates (int): The maximum number of gates allowed per episode.
+		action_set (list): A list of dictionaries representing all possible gate actions.
+		action_space (spaces.Discrete): The discrete action space.
+		observation_space (spaces.Dict): The observation space for the agent.
+		target_state_object (Union[TargetState, GeneralTargetState]): The target state for the current episode.
+		state_vector (Statevector): The Qiskit Statevector object representing the target state.
+		num_qubits (int): The number of qubits for the current episode.
+		max_gates (int): The max gates for the current episode.
+		qc (QuantumCircuit): The Qiskit QuantumCircuit object representing the current circuit.
+		current_circuit_state (Statevector): The Qiskit Statevector object representing the current circuit's state.
+		valid_actions (np.ndarray): A boolean mask of valid actions for the current episode.
+	"""
 	metadata = { "render_modes": ["human"], "render_fps": 30}
 
 	def __init__(self,
 				 target_states_list: list[Union[TargetState, GeneralTargetState]],
 				 max_env_qubits: int,
 				 max_env_gates: int):
+		"""
+		Initializes the QuantumStatePreparation environment.
+
+		Args:
+			target_states_list (list): A list of possible target states.
+			max_env_qubits (int): The maximum number of qubits the environment should support.
+			max_env_gates (int): The maximum number of gates the environment should support.
+		"""
 		super().__init__()
 
 		# General parameters
@@ -30,7 +67,7 @@ class QuantumStatePreparation(gym.Env):
 		if not self.target_states_list:
 			raise ValueError("target_states_list cannot be empty.")
 
-		# Determine the maximum number of qubits and max gates for the environment's fixed spaces ---
+		# Determine the maximum number of qubits and max gates for the environment's fixed spaces
 		self.max_env_qubits = max_env_qubits
 		self.max_env_gates = max_env_gates
 
@@ -42,11 +79,18 @@ class QuantumStatePreparation(gym.Env):
 		self.reset()
 
 		self.observation_space = spaces.Dict({
-			"pauli": spaces.Box(low=-1.0, high=1.0, shape=(3 * self.max_env_qubits,), dtype=np.float64),
-			"meta": spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float64) # Fidelity & Gates Remaining
+			"pauli": spaces.Box(low=-1.0, high=1.0, shape=(3 * self.max_env_qubits,), dtype=np.float32),
+			"meta": spaces.Box(low=0.0, high=1.0, shape=(2,), dtype=np.float32) # Fidelity & Gates Remaining
 		})
 
 	def set_up_target_state(self, target_state_object: Union[TargetState, GeneralTargetState] = None):
+		"""
+		Sets the target state for the current episode.
+
+		Args:
+			target_state_object (Union[TargetState, GeneralTargetState], optional): The target state to use.
+			If None, a random state is chosen from the list. Defaults to None.
+		"""
 		self.target_state_object: Union[TargetState, GeneralTargetState] = None
 		if target_state_object is not None:
 			self.target_state_object = target_state_object
@@ -57,6 +101,16 @@ class QuantumStatePreparation(gym.Env):
 		self.max_gates = self.target_state_object.max_gates
 
 	def compute_pauli_expectations(self, statevector, num_qubits):
+		"""
+		Computes the Pauli expectation values for a given statevector.
+
+		Args:
+			statevector (Statevector): The statevector for which to compute the expectations.
+			num_qubits (int): The number of qubits.
+
+		Returns:
+			np.ndarray: An array of Pauli expectation values (X, Y, Z for each qubit).
+		"""
 		expectations = []
 		for i in range(num_qubits):
 			for pauli_str in ['X', 'Y', 'Z']:
@@ -68,6 +122,12 @@ class QuantumStatePreparation(gym.Env):
 		return np.array(expectations, dtype=np.float32)
 
 	def _get_obs(self):
+		"""
+		Generates the observation for the agent.
+
+		Returns:
+			dict: A dictionary containing the 'pauli' vector and 'meta' data.
+		"""
 		# Compute Pauli expectations for only the active qubits
 		pauli_obs = self.compute_pauli_expectations(self.current_circuit_state, self.num_qubits)  # shape: 3 * num_qubits
 
@@ -86,6 +146,12 @@ class QuantumStatePreparation(gym.Env):
 		return obs
 
 	def obs_to_string(self, obs):
+		"""
+		Prints a human-readable representation of the observation.
+
+		Args:
+			obs (dict): The observation dictionary.
+		"""
 		num_qubits = self.num_qubits
 		pauli_len = 3 * num_qubits
 
@@ -106,6 +172,12 @@ class QuantumStatePreparation(gym.Env):
 		print(f"\t\tGates Remaining (normalized): {gates_remaining_norm:.4f}")
 
 	def _get_info(self):
+		"""
+		Generates the info dictionary for the agent.
+
+		Returns:
+			dict: A dictionary containing fidelity, gates count, and Pauli expectations.
+		"""
 		from qiskit.quantum_info import Pauli
 
 		# Fidelity
@@ -130,6 +202,12 @@ class QuantumStatePreparation(gym.Env):
 		}
 
 	def info_to_string(self, info):
+		"""
+		Prints a human-readable representation of the info dictionary.
+
+		Args:
+			info (dict): The info dictionary.
+		"""
 		fidelity = info.get("fidelity", None)
 		gates_count = info.get("gates_count", None)
 
@@ -150,6 +228,15 @@ class QuantumStatePreparation(gym.Env):
 			print(f"\t\tQubit {q}: " + ", ".join(expectations))
 
 	def generate_action_state(self, num_qubits: int):
+		"""
+		Generates the complete set of possible actions.
+
+		Args:
+			num_qubits (int): The number of qubits to consider for actions.
+
+		Returns:
+			list: A list of action dictionaries.
+		"""
 		action_space = []
 		for gate_cls in self.base_gates:
 			if gate_cls is CXGate:
@@ -166,22 +253,16 @@ class QuantumStatePreparation(gym.Env):
 		return action_space
 
 	def compute_valid_action_mask(self):
-		# Compute which global action indices are valid for this episode:
-		# Gate classes allowed per target-state (use state_name strings)
-		allowed_by_state = {
-			TargetStateName.GHZ_STATE.value: [HGate, CXGate, None],
-			TargetStateName.UNIFORM_SUPERPOSITION.value: [HGate, CXGate, None],
-			TargetStateName.COMPUTATIONAL_BASIS_STATE.value: [XGate, ZGate, None],
-			None: self.base_gates
-		}
-		allowed = allowed_by_state.get(self.target_state_object.state_name, self.base_gates)
-		allowed_set = set(allowed)
+		"""
+		Computes a boolean mask indicating which actions are valid for the current episode.
 
+		Returns:
+			np.ndarray: A boolean array where True indicates a valid action.
+		"""
 		mask = []
 		for a in self.action_set:
 			if a["qubits"] is None:
-				is_valid = a["gate_class"] in allowed_set
-				mask.append(is_valid)
+				mask.append(True)
 				continue
 
 			# invalid if any qubit index >= current num_qubits
@@ -189,15 +270,22 @@ class QuantumStatePreparation(gym.Env):
 				mask.append(False)
 				continue
 
-			# invalid if gate class not allowed for this target state's gate set
-			if a["gate_class"] not in allowed_set:
-				mask.append(False)
-				continue
 			mask.append(True)
    
 		return np.array(mask, dtype=bool)
 
 	def reset(self, seed=None, target_state_object: Union[TargetState, GeneralTargetState] = None):
+		"""
+		Resets the environment for a new episode.
+
+		Args:
+			seed (int, optional): The random seed. Defaults to None.
+			target_state_object (Union[TargetState, GeneralTargetState], optional): The target state for the new episode.
+			Defaults to None.
+
+		Returns:
+			tuple: A tuple containing the initial observation and info dictionary.
+		"""
 		super().reset(seed=seed)
 
 		self.set_up_target_state(target_state_object)
@@ -219,6 +307,15 @@ class QuantumStatePreparation(gym.Env):
 		return observation, info
 
 	def step(self, action):
+		"""
+		Takes a step in the environment by applying the chosen action.
+
+		Args:
+			action (int): The index of the action to take.
+
+		Returns:
+			tuple: A tuple containing the new observation, reward, terminated flag, truncated flag, and info dictionary.
+		"""
 		if not self.valid_actions[action]:
 			# Penalize and ignore the illegal action
 			self.current_gates_count += 1
@@ -272,44 +369,61 @@ class QuantumStatePreparation(gym.Env):
 		return observation, reward, terminated, truncated, info
 
 	def reward(self, isNone: bool = False):
-		FID_THRESHOLD = 0.999    # The success threshold for fidelity
-		SUCCESS_BONUS = 10.0     # A large reward for reaching the goal
-		FAILURE_PENALTY = -10.0  # A large penalty for running out of gates
-		GATE_PENALTY = -0.1      # A small penalty for each gate used
+		"""
+		Improved reward shaping:
+		- Dense shaping from fidelity delta
+		- Negative reward if fidelity stagnates
+		- Balanced terminal bonuses to reduce variance
+		"""
+		FID_THRESHOLD = 0.99        # Slightly relaxed for learning stability
+		SUCCESS_BONUS = 10.0
+		FAILURE_PENALTY = -1.0
+		BASE_STEP_PENALTY = 0.1    # Mild gate cost
 
-		# Update fidelity calculation
+		# Update fidelity
 		self.previous_fidelity = self.current_fidelity if self.current_fidelity != -1 else 0.0
 		self.current_fidelity = np.abs(self.current_circuit_state.inner(self.state_vector)) ** 2
-		
+
 		terminated = False
 		truncated = False
-  
-		# Check for success
+
+		# Success
 		if self.current_fidelity >= FID_THRESHOLD:
-			# Reward efficiency by penalizing extra gates
-			reward = SUCCESS_BONUS - (self.current_gates_count * GATE_PENALTY)
+			reward = SUCCESS_BONUS - (self.current_gates_count * BASE_STEP_PENALTY)
 			terminated = True
 			return reward, terminated, truncated
 
-		# Check for failure (out of gates)
+		# Out of gates
 		if self.current_gates_count >= self.max_gates:
 			reward = FAILURE_PENALTY
 			truncated = True
 			return reward, terminated, truncated
-		
-		# Reward for the 'none' action. This reward must be small to encourage the agent to continue.
-		if isNone: 
+
+		# 'None' (early stop)
+		if isNone:
 			terminated = True
-			# The reward for stopping early is based on fidelity but is always less than the SUCCESS_BONUS
-			reward = (self.current_fidelity * 5.0) - (self.current_gates_count * GATE_PENALTY)
+			reward = (self.current_fidelity * SUCCESS_BONUS) - (self.current_gates_count * BASE_STEP_PENALTY)
 			return reward, terminated, truncated
-		
-		# For all other steps, reward progress and penalize gate use
-		reward = (self.current_fidelity - self.previous_fidelity) * 10 - GATE_PENALTY
+
+		# Step shaping
+		delta_fid = self.current_fidelity - self.previous_fidelity
+
+		if delta_fid > 0:
+			reward = delta_fid * 2.0 - BASE_STEP_PENALTY
+		else:
+			# Actively punish stagnation or regression
+			reward = delta_fid * 2.0 - 0.05  
+
 		return reward, terminated, truncated
 
 	def render(self):
+		"""
+		Renders the environment.
+		"""
 		pass
 
 	def close(self):
+		"""
+		Closes the environment.
+		"""
 		pass

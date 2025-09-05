@@ -20,6 +20,17 @@ class ALPBandTeacher:
 				 replay_prob: float = 0.15,
 				 difficulty_fn=None,
 				 min_samples_for_alp:int=10):
+		"""
+		Initializes the ALPBandTeacher.
+
+		Args:
+			target_states_list: A list of target quantum states.
+			n_bins (int): The number of discrete difficulty bands.
+			window_size (int): The per-bin sliding window size.
+			replay_prob (float): The probability of sampling from the replay buffer.
+			difficulty_fn: A function to calculate the difficulty score of a state.
+			min_samples_for_alp (int): The minimum number of samples needed to calculate ALP.
+		"""
 		self.target_states_list = list(target_states_list)
 		self.n_bins = max(1, n_bins)
 		self.window_size = max(1, window_size)
@@ -27,29 +38,29 @@ class ALPBandTeacher:
 		self.min_samples_for_alp = min_samples_for_alp
 
 		if difficulty_fn is None:
-			# default difficulty: emphasize number of qubits then max_gates
+			# Default difficulty: emphasize number of qubits then max_gates
 			def difficulty_fn_default(ts):
 				return getattr(ts, "num_qubits", 1) * 100.0 + getattr(ts, "max_gates", 0)
 			self.difficulty_fn = difficulty_fn_default
 		else:
 			self.difficulty_fn = difficulty_fn
 
-		# compute difficulty scores and bin indices
+		# Compute difficulty scores and bin indices
 		scores = [(i, self.difficulty_fn(ts)) for i, ts in enumerate(self.target_states_list)]
 		scores.sort(key=lambda x: x[1])
 		indices_sorted = [i for i, _ in scores]
 
-		# chunk sorted indices into bins (as evenly as possible)
+		# Chunk sorted indices into bins (as evenly as possible)
 		self.bins = {b: [] for b in range(self.n_bins)}
 		for idx_pos, global_idx in enumerate(indices_sorted):
 			bin_idx = int(self.n_bins * idx_pos / max(1, len(indices_sorted)))
-			# clamp
+			# Clamp
 			bin_idx = min(self.n_bins - 1, max(0, bin_idx))
 			self.bins[bin_idx].append(global_idx)
 
-		# per-bin reward history (2*window to compare two windows)
+		# Per-bin reward history (2*window to compare two windows)
 		self.bin_rewards = {b: deque(maxlen=2 * self.window_size) for b in range(self.n_bins)}
-		# replay buffer stores global indices of interesting tasks (recent successes / high ALP)
+		# Replay buffer stores global indices of interesting tasks (recent successes / high ALP)
 		self.replay_buffer = deque(maxlen=1000)
 
 	def _bin_alp(self, bin_idx):
@@ -81,14 +92,14 @@ class ALPBandTeacher:
 			alps.append(max(alp, eps))
 		total = sum(alps)
 		if total <= 0:
-			# uniform fallback
+			# Uniform fallback
 			probs = [1.0 / self.n_bins] * self.n_bins
 		else:
 			probs = [a/total for a in alps]
-		# ensure some exploration: mix with uniform
+		# Ensure some exploration: mix with uniform
 		mix = 0.15
 		probs = [(1-mix)*p + mix*(1.0/self.n_bins) for p in probs]
-		# sample
+		# Sample
 		r = random.random()
 		cum = 0.0
 		for b, p in enumerate(probs):
@@ -103,15 +114,15 @@ class ALPBandTeacher:
 		With probability replay_prob, draw from replay buffer.
 		Otherwise sample a bin based on ALP and then a random element from that bin.
 		"""
-		# replay
+		# Replay
 		if len(self.replay_buffer) > 0 and random.random() < self.replay_prob:
 			return random.choice(list(self.replay_buffer))
 
-		# choose a bin
+		# Choose a bin
 		bin_idx = self.sample_bin()
 		candidates = self.bins.get(bin_idx, [])
 		if not candidates:
-			# fallback: sample any global index
+			# Fallback: sample any global index
 			return random.randrange(len(self.target_states_list))
 		return random.choice(candidates)
 
@@ -120,22 +131,22 @@ class ALPBandTeacher:
 		Notify teacher that an episode for a task (global_idx) finished with final fidelity.
 		We append fidelity into bin history and optionally add to replay_buffer when interesting.
 		"""
-		# map global_idx to bin
+		# Map global_idx to bin
 		bin_idx = None
 		for b, lst in self.bins.items():
 			if global_idx in lst:
 				bin_idx = b
 				break
 		if bin_idx is None:
-			# shouldn't happen, but place in last bin
+			# Shouldn't happen, but place in last bin
 			bin_idx = self.n_bins - 1
 		self.bin_rewards[bin_idx].append(float(fidelity))
 
-		# heuristics for replay: if success or high improvement, add to replay
-		# e.g., if fidelity > 0.95 or fidelity increased recently
+		# Heuristics for replay: if success or high improvement, add to replay
+		# E.g., if fidelity > 0.95 or fidelity increased recently
 		if fidelity >= 0.95:
 			self.replay_buffer.append(global_idx)
-		# also keep some random successful tasks
+		# Also keep some random successful tasks
 		elif fidelity >= 0.8 and random.random() < 0.1:
 			self.replay_buffer.append(global_idx)
 
@@ -143,7 +154,7 @@ class ALPBandTeacher:
 		return self.target_states_list[global_idx]
 
 	def debug_stats(self):
-		# return a compact dict for logging
+		# Return a compact dict for logging
 		stats = {}
 		for b in range(self.n_bins):
 			dq = list(self.bin_rewards[b])
@@ -173,7 +184,7 @@ class TeacherEnvWrapper(gym.Env):
 			max_env_qubits=self.max_env_qubits,
 			max_env_gates=self.max_env_gates
 		)
-		# expose space info to SB3
+		# Expose space info to SB3
 		self.observation_space = self.env.observation_space
 		self.action_space = self.env.action_space
 		self.current_global_idx = None
@@ -188,7 +199,7 @@ class TeacherEnvWrapper(gym.Env):
 		self.current_global_idx = global_idx
 		target_state_obj = self.target_states_list[global_idx]
   
-		# print(f"ALP Teacher selected state: {target_state_obj.state_name} ({target_state_obj.num_qubits} qubits)")
+		# Print(f"ALP Teacher selected state: {target_state_obj.state_name} ({target_state_obj.num_qubits} qubits)")
 		
 		# Call the underlying reset, passing the target state
 		# The underlying QuantumStatePreparation.reset() returns (observation, info)
@@ -227,4 +238,3 @@ class TeacherEnvWrapper(gym.Env):
 
 	def close(self):
 		return self.env.close()
-
