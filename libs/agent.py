@@ -61,17 +61,17 @@ class QuantumnAgent():
 			is_curriculum (bool, optional): If true, uses curriculum learning. Defaults to False.
 			use_alp (bool, optional): If true, uses ALP for curriculum learning. Defaults to False.
 		"""
-		self.log_dir = "./logs/" + DIR_NAME
-		os.makedirs(self.log_dir, exist_ok=True)
-
-		self.model_dir = "./model/" + DIR_NAME
-		os.makedirs(self.model_dir, exist_ok=True)
-
-		self.config_path = self.model_dir + "env_config.json"
-
 		if model_folder_name is None:
 			raise ValueError("Missing Folder Name for the model")
 		self.model_folder_name = model_folder_name
+  
+		self.log_dir = "./logs/" + DIR_NAME + model_folder_name + "/"
+		os.makedirs(self.log_dir, exist_ok=True)
+
+		self.model_dir = "./model/" + DIR_NAME + model_folder_name + "/"
+		os.makedirs(self.model_dir, exist_ok=True)
+
+		self.config_path = self.model_dir + "env_config.json"
 		
 		if training_mode:
 			print("Agent initialize in traning mode.")
@@ -215,7 +215,7 @@ class QuantumnAgent():
 			deterministic=True,
 			render=False,
 			callback_after_eval=stop_train_callback,
-			best_model_save_path=self.model_dir + self.model_folder_name,
+			best_model_save_path=self.model_dir,
 		)
 
 	def set_up_curriculum_callback(self):
@@ -234,7 +234,7 @@ class QuantumnAgent():
 			eval_freq=self.eval_frequency,
 			n_eval_episodes=self.eval_episode,
 			log_path=self.log_dir,
-			best_model_save_path=self.model_dir + self.model_folder_name,
+			best_model_save_path=self.model_dir,
 			verbose=1,
 		)
 
