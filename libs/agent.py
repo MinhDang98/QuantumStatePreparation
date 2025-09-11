@@ -39,6 +39,7 @@ class QuantumnAgent():
 		model (PPO): The PPO agent model.
 	"""
 	def __init__(self,
+				 model_folder_name: str = None,
 				 target_states_list: list[Union[TargetState, GeneralTargetState]] = None,
 				 total_timesteps: int = None,
 				 eval_frequency: float = None,
@@ -50,6 +51,7 @@ class QuantumnAgent():
 		Initializes the QuantumAgent.
 
 		Args:
+			model_folder_name (str): The folder where the model is stored.
 			target_states_list (list, optional): List of quantum states. Defaults to None.
 			total_timesteps (int, optional): Total training timesteps. Defaults to None.
 			eval_frequency (float, optional): Evaluation frequency. Defaults to None.
@@ -67,6 +69,10 @@ class QuantumnAgent():
 
 		self.config_path = self.model_dir + "env_config.json"
 
+		if model_folder_name is None:
+			raise ValueError("Missing Folder Name for the model")
+		self.model_folder_name = model_folder_name
+		
 		if training_mode:
 			print("Agent initialize in traning mode.")
 
@@ -209,7 +215,7 @@ class QuantumnAgent():
 			deterministic=True,
 			render=False,
 			callback_after_eval=stop_train_callback,
-			best_model_save_path=self.model_dir,
+			best_model_save_path=self.model_dir + self.model_folder_name,
 		)
 
 	def set_up_curriculum_callback(self):
@@ -228,7 +234,7 @@ class QuantumnAgent():
 			eval_freq=self.eval_frequency,
 			n_eval_episodes=self.eval_episode,
 			log_path=self.log_dir,
-			best_model_save_path=self.model_dir,
+			best_model_save_path=self.model_dir + self.model_folder_name,
 			verbose=1,
 		)
 
@@ -317,17 +323,20 @@ class QuantumnAgent():
 			tb_log_name=f"PPO_ALP"
 		)
 
-	def build_circuit(self, target_state: Union[TargetState, GeneralTargetState]):
+	def build_circuit(self, 
+				   folder_name: str,
+				   target_state: Union[TargetState, GeneralTargetState]):
 		"""
 		Builds a quantum circuit for a given target state using the trained model.
 
 		Args:
+			folder_name (str): The folder where the model is stored.
 			target_state (Union[TargetState, GeneralTargetState]): The target quantum state.
 
 		Returns:
 			The quantum circuit if successful, otherwise None.
 		"""
-		best_model_path = os.path.join(self.model_dir, MODEL_NAME)
+		best_model_path = os.path.join(self.model_dir + folder_name, MODEL_NAME)
 		if not os.path.exists(best_model_path):
 			print(f"[Error] No best model found at {best_model_path}")
 			return None
