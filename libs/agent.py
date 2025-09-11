@@ -3,10 +3,12 @@ import os
 import numpy as np
 import torch
 from typing import Union
-from stable_baselines3 import PPO
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.monitor import Monitor
 from libs.alp import ALPBandTeacher, TeacherEnvWrapper
 from .quantum_state_preparation import QuantumStatePreparation
 from .target_state import TargetState, GeneralTargetState
@@ -43,7 +45,6 @@ class QuantumnAgent():
 				 eval_episode: float = None,
 				 training_mode: bool = False,
 	 			 verbose: int = 0,
-	  			 is_curriculum: bool = False,
 	  			 use_alp: bool = False):
 		"""
 		Initializes the QuantumAgent.
@@ -85,11 +86,8 @@ class QuantumnAgent():
 
 			self.save_env_config(self.config_path)
 
-			if is_curriculum:
-				if use_alp:
-					self.alp_train_curriculum()
-				else:
-					self.train_curriculum()
+			if use_alp:
+				self.alp_train_curriculum()
 			else:
 				self.train_model()
 
@@ -143,12 +141,17 @@ class QuantumnAgent():
 		if target_states_list is None:
 			target_states_list = self.target_states_list
 
-		# Make_vec_env handles creation and wrapping for stable-baselines3 compatibility.
-		# env_kwargs passes arguments to your QuantumStatePreparation.__init__
-		self.env = QuantumStatePreparation(target_states_list=target_states_list,
-											max_env_qubits=self.max_env_qubits,
-											max_env_gates=self.max_env_gates)
+		def mask_fn(env):
+			return env.compute_valid_action_mask()
 
+		raw_env = QuantumStatePreparation(
+			target_states_list=target_states_list,
+			max_env_qubits=self.max_env_qubits,
+			max_env_gates=self.max_env_gates
+		)
+		self.env = Monitor(ActionMasker(raw_env, mask_fn))
+		self.eval_env = Monitor(ActionMasker(raw_env, mask_fn))
+  
 	def initialize_environment_with_teacher(self,
 											n_bins: int = 5,
 											window_size: int = 100,
@@ -173,22 +176,21 @@ class QuantumnAgent():
 		)
   
 		def make_wrapper_env():
-			"""
-			A factory function to create a TeacherEnvWrapper.
-
-			Returns:
-				TeacherEnvWrapper: The wrapped environment.
-			"""
-			return TeacherEnvWrapper(
-				target_states_list=self.target_states_list,
-				teacher=self.teacher,
-				max_env_qubits=self.max_env_qubits,
-				max_env_gates=self.max_env_gates
+			def mask_fn(env):
+				return env.action_masks()
+			return ActionMasker(
+				TeacherEnvWrapper(
+					target_states_list=self.target_states_list,
+					teacher=self.teacher,
+					max_env_qubits=self.max_env_qubits,
+					max_env_gates=self.max_env_gates
+				),
+				mask_fn
 			)
-
-		# use make_vec_env with a callable factory (keeps SB3 speed & wrapping)
+   
 		self.env = make_vec_env(make_wrapper_env, n_envs=1)
-
+		self.eval_env = make_vec_env(make_wrapper_env, n_envs=1)
+  
 	def set_up_callbacks(self):
 		"""
 		Sets up the standard evaluation and stop training callbacks.
@@ -200,7 +202,7 @@ class QuantumnAgent():
 		)
 
 		self.callbacks = EvalCallback(
-			self.env,
+			self.eval_env,
 			log_path=self.log_dir,
 			eval_freq=self.eval_frequency,
 			n_eval_episodes=self.eval_episode,
@@ -221,7 +223,7 @@ class QuantumnAgent():
 		)
   
 		self.curriculum_callback = EvalCallback(
-			self.env,
+			self.eval_env,
 			callback_on_new_best=stop_train_callback,
 			eval_freq=self.eval_frequency,
 			n_eval_episodes=self.eval_episode,
@@ -238,7 +240,7 @@ class QuantumnAgent():
 			net_arch=dict(pi=[256,256], vf=[256,256])
 		)
 
-		self.model = PPO(
+		self.model = MaskablePPO(
 			"MultiInputPolicy",
 			self.env,
 			learning_rate=1e-3,
@@ -248,7 +250,7 @@ class QuantumnAgent():
 			gamma=0.995,
 			gae_lambda=0.95,
 			clip_range=0.2,
-			ent_coef=0.05,
+			ent_coef=0.01,
 			policy_kwargs=self.policy_kwargs,
 			verbose=0,
 			tensorboard_log=self.log_dir,
@@ -314,71 +316,6 @@ class QuantumnAgent():
 			progress_bar=True,
 			tb_log_name=f"PPO_ALP"
 		)
-   
-	def train_curriculum(self):
-		"""
-		Trains the model using a standard curriculum where it trains on one state at a time.
-		"""
-		print("Starting curriculum training...")
-   
-		for i, target_state in enumerate(self.target_states_list):
-			print(f"\n--- Training on State {i+1}: {target_state.to_string()} ---")
-   
-			# Close old env to avoid leaking resources
-			self.close_env()
-   
-			# Initialize env for current stage
-			self.initialize_environment(target_states_list=[target_state])
-	
-			if i == 0:
-				# First stage: create model from scratch
-				self.set_up_model()
-
-			# Bind callback to the current env
-			self.set_up_curriculum_callback()
-
-			# Quick evaluation before training to observe baseline on this stage
-			try:
-				# Ask for episode rewards explicitly to avoid ambiguity
-				eval_res = evaluate_policy(
-					self.model, self.env,
-					n_eval_episodes=5,
-					deterministic=True,
-					return_episode_rewards=True
-				)
-
-				episode_rewards, episode_lengths = eval_res
-				mean_reward = float(np.mean(episode_rewards))
-				std_reward = float(np.std(episode_rewards))
-
-				print(f"[Pre-Train Eval] mean_reward={mean_reward:.2f} +/- {std_reward:.2f}")
-			except Exception as e:
-				print(f"[Pre-Train Eval] evaluation failed: {e}")
-
-			# learn for this curriculum stage
-			print(f"Starting training stage {i+1} for {self.total_timesteps} timesteps...")
-			self.model.learn(
-				total_timesteps=self.total_timesteps,
-				callback=self.curriculum_callback,
-				progress_bar=True,
-				tb_log_name=f"PPO_stage_{i+1}"
-			)
-
-		# final joint training on all states (conservative re-create again)
-		print("\n--- Final joint training on all states to promote generalization ---")
-		self.close_env()
-		self.initialize_environment(target_states_list=self.target_states_list)
-	
-		self.set_up_curriculum_callback()
-
-		self.model.learn(
-			total_timesteps=self.total_timesteps * 2,
-			callback=self.curriculum_callback,
-			progress_bar=True,
-			tb_log_name="PPO_Joint_Training"
-		)
-
-		print("\nCurriculum training finished.")
 
 	def build_circuit(self, target_state: Union[TargetState, GeneralTargetState]):
 		"""
@@ -403,13 +340,14 @@ class QuantumnAgent():
 		)
 
 		print(f"[Info] Loading trained model from {best_model_path}")
-		best_model = PPO.load(best_model_path)
+		best_model = MaskablePPO.load(best_model_path)
 
 		obs, info = eval_env.reset()
 		steps, done = 0, False
 
 		while not done and steps < target_state.max_gates:
-			action, _ = best_model.predict(obs, deterministic=True)
+			mask = eval_env.compute_valid_action_mask()
+			action, _ = best_model.predict(obs, deterministic=True, action_masks=mask)
 			obs, reward, terminated, truncated, info_eval = eval_env.step(action)
 			done = terminated or truncated
 			steps += 1

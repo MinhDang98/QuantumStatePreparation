@@ -215,7 +215,6 @@ class TeacherEnvWrapper(gym.Env):
 
 		return observation, info
 
-
 	def step(self, action):
 		# Forward to underlying env
 		obs, reward, terminated, truncated, info = self.env.step(action)
@@ -233,8 +232,6 @@ class TeacherEnvWrapper(gym.Env):
 
 		return obs, reward, terminated, truncated, info
 
-	def render(self, *args, **kwargs):
-		return self.env.render(*args, **kwargs)
-
-	def close(self):
-		return self.env.close()
+	def action_masks(self):
+		"""Forward to underlying env's action mask."""
+		return self.env.compute_valid_action_mask()

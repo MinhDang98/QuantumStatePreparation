@@ -259,22 +259,37 @@ class QuantumStatePreparation(gym.Env):
 		Returns:
 			np.ndarray: A boolean array where True indicates a valid action.
 		"""
+		# Compute which global action indices are valid for this episode:
+		# Gate classes allowed per target-state (use state_name strings)
+		allowed_by_state = {
+			TargetStateName.GHZ_STATE.value: [HGate, CXGate, None],
+			TargetStateName.UNIFORM_SUPERPOSITION.value: [HGate, CXGate, None],
+			TargetStateName.COMPUTATIONAL_BASIS_STATE.value: [XGate, ZGate, None],
+			None: self.base_gates
+		}
+		allowed = allowed_by_state.get(self.target_state_object.state_name, self.base_gates)
+		allowed_set = set(allowed)
+
 		mask = []
 		for a in self.action_set:
 			if a["qubits"] is None:
 				mask.append(True)
 				continue
 
-			# invalid if any qubit index >= current num_qubits
+			# Invalid if any qubit index >= current num_qubits
 			if any(q >= self.num_qubits for q in a["qubits"]):
 				mask.append(False)
 				continue
 
+			# Invalid if gate class not allowed for this target state's gate set
+			if a["gate_class"] not in allowed_set:
+				mask.append(False)
+				continue
 			mask.append(True)
    
 		return np.array(mask, dtype=bool)
 
-	def reset(self, seed=None, target_state_object: Union[TargetState, GeneralTargetState] = None):
+	def reset(self, seed=None, options=None, target_state_object: Union[TargetState, GeneralTargetState] = None):
 		"""
 		Resets the environment for a new episode.
 
@@ -317,13 +332,8 @@ class QuantumStatePreparation(gym.Env):
 			tuple: A tuple containing the new observation, reward, terminated flag, truncated flag, and info dictionary.
 		"""
 		if not self.valid_actions[action]:
-			# Penalize and ignore the illegal action
-			self.current_gates_count += 1
-			reward = -10.0
-			terminated = False
-			truncated = False
-			if self.current_gates_count >= self.max_gates:
-				truncated = True
+			# Penalize and ignore the invalid action
+			reward, terminated, truncated = self.reward(isInvalid=True)
 			observation = self._get_obs()
 			info = self._get_info()
 			return observation, reward, terminated, truncated, info
@@ -368,62 +378,82 @@ class QuantumStatePreparation(gym.Env):
 		# Need to follow this order with stable-baseline3
 		return observation, reward, terminated, truncated, info
 
-	def reward(self, isNone: bool = False):
+	def reward(self, isNone: bool = False, isInvalid: bool = False):
 		"""
-		Improved reward shaping:
-		- Dense shaping from fidelity delta
-		- Negative reward if fidelity stagnates
-		- Balanced terminal bonuses to reduce variance
-		"""
-		FID_THRESHOLD = 0.99        # Slightly relaxed for learning stability
-		SUCCESS_BONUS = 10.0
-		FAILURE_PENALTY = -1.0
-		BASE_STEP_PENALTY = 0.1    # Mild gate cost
+		Improved reward with potential-based shaping.
 
-		# Update fidelity
+		Behaviour summary:
+		- Terminal success: +SUCCESS_BONUS (keeps a clear signal for completion).
+		- Out-of-gates / early-stop: final fidelity scaled reward + small gate penalty.
+		- Invalid action: immediate strong negative penalty (increments gate count).
+		- Non-terminal step: potential-based shaping computed from fidelity (uses -log(1-f))
+		which amplifies progress as fidelity approaches 1, plus a small step penalty.
+		"""
+		# --- Tunable hyperparameters ---
+		SUCCESS_BONUS = 10.0        # terminal success reward
+		FAILURE_PENALTY = -1.0      # small fallback penalty for failures
+		BASE_STEP_PENALTY = 0.05    # per-step cost (reduce lingering)
+		INVALID_PENALTY = -5.0      # invalid-action penalty
+		SHAPING_K = 4.0             # shaping magnitude (higher => stronger shaping)
+		GAMMA = 0.995               # should match your PPO gamma for strict potential shaping
+		EPS = 1e-9                  # numerical stability
+
+		# --- preserve previous fidelity semantics from your original code ---
 		self.previous_fidelity = self.current_fidelity if self.current_fidelity != -1 else 0.0
 		self.current_fidelity = np.abs(self.current_circuit_state.inner(self.state_vector)) ** 2
 
-		terminated = False
-		truncated = False
+		prev_fid = self.previous_fidelity
+		cur_fid = self.current_fidelity
+		terminated, truncated = False, False
 
-		# Success
-		if self.current_fidelity >= FID_THRESHOLD:
-			reward = SUCCESS_BONUS - (self.current_gates_count * BASE_STEP_PENALTY)
+		# --- potential = -log(1 - fidelity)  (amplifies signal near 1.0) ---
+		def _potential(f):
+			return -np.log(1.0 - f + EPS)
+
+		phi_prev = _potential(prev_fid)
+		phi_cur = _potential(cur_fid)
+		shaping_reward = SHAPING_K * (GAMMA * phi_cur - phi_prev)
+		# Note: using GAMMA here implements classic potential-based shaping:
+		#   R' = R + gamma*Phi(s') - Phi(s)
+		# This preserves optimal policy while adding dense learning signal.
+
+		# --- Invalid action (centralise the invalid handling here) ---
+		if isInvalid:
+			# increment gate count (match previous behaviour in your snippet)
+			self.current_gates_count += 1
+			base = INVALID_PENALTY
+			if self.current_gates_count >= self.max_gates:
+				truncated = True
+			reward = base + shaping_reward - BASE_STEP_PENALTY
+			return reward, terminated, truncated
+
+		# --- Success (terminal) ---
+		if cur_fid >= 0.99:
+			reward = SUCCESS_BONUS + shaping_reward
 			terminated = True
 			return reward, terminated, truncated
 
-		# Out of gates
+		# --- Out of gates (episode ended by truncation) ---
 		if self.current_gates_count >= self.max_gates:
-			reward = FAILURE_PENALTY
+			# reward scales with final fidelity, penalize longer circuits
+			base = cur_fid * SUCCESS_BONUS - (self.current_gates_count * BASE_STEP_PENALTY) + FAILURE_PENALTY
 			truncated = True
+			reward = base + shaping_reward
 			return reward, terminated, truncated
 
-		# 'None' (early stop)
+		# --- Early stop (None action) ---
 		if isNone:
 			terminated = True
-			reward = (self.current_fidelity * SUCCESS_BONUS) - (self.current_gates_count * BASE_STEP_PENALTY)
+			if cur_fid >= 0.9:
+				reward = cur_fid * SUCCESS_BONUS + shaping_reward
+			else:
+				reward = FAILURE_PENALTY * 5 + shaping_reward
 			return reward, terminated, truncated
 
-		# Step shaping
-		delta_fid = self.current_fidelity - self.previous_fidelity
-
-		if delta_fid > 0:
-			reward = delta_fid * 2.0 - BASE_STEP_PENALTY
-		else:
-			# Actively punish stagnation or regression
-			reward = delta_fid * 2.0 - 0.05  
-
+		# --- Normal (non-terminal) step: shaped signal minus small step penalty ---
+		reward = shaping_reward - BASE_STEP_PENALTY
 		return reward, terminated, truncated
 
-	def render(self):
-		"""
-		Renders the environment.
-		"""
-		pass
-
-	def close(self):
-		"""
-		Closes the environment.
-		"""
-		pass
+	def action_masks(self):
+		"""For MaskablePPO compatibility."""
+		return self.compute_valid_action_mask()
