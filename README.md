@@ -129,21 +129,36 @@ results = bm.run_all(n_eval_episodes=20)
 
 I benchmarked two training strategies:
 
-- Fixed Target States: agent trained only on predefined fixed states.
+- **Fixed Target States**: agent trained only on predefined fixed states.
 
-- General Target States: agent trained on scalable, generalized states (e.g., GHZ with 2–4 qubits, uniform superposition with 2–4 qubits).
+- **General Target States**: agent trained on scalable, generalized states (e.g., GHZ with 2–4 qubits, uniform superposition with 2–4 qubits).
+
+### Plot
 
 ![Agent Benchmark Performance](./benchmark_plot.png)
 
-The agents were evaluated on a benchmark suite including GHZ(3), Uniform Superposition(3), Bell State (Ψ⁺), and Computational Basis State.
+### Summary Table
+| Agent                   | Suite    | State                       | Qubits | Max Gates | Mean Reward | Std Reward |
+| ----------------------- | -------- | --------------------------- | ------ | --------- | ----------- | ---------- |
+| General\_Target\_States | fixed    | BELL\_STATE\_PSI            | 2      | 5         | 0.19        | 8.25       |
+| General\_Target\_States | fixed    | COMPUTATIONAL\_BASIS\_STATE | 2      | 3         | 5.36        | 8.25       |
+| Fixed\_Target\_States   | fixed    | BELL\_STATE\_PSI            | 2      | 5         | 10.26       | 7.75       |
+| Fixed\_Target\_States   | fixed    | COMPUTATIONAL\_BASIS\_STATE | 2      | 3         | -15.15      | 0.00       |
+| General\_Target\_States | scalable | GHZ\_STATE                  | 3      | 5         | -5.23       | 0.05       |
+| General\_Target\_States | scalable | UNIFORM\_SUPERPOSITION      | 3      | 5         | 10.18       | 7.75       |
+| Fixed\_Target\_States   | scalable | GHZ\_STATE                  | 3      | 5         | -5.28       | 0.05       |
+| Fixed\_Target\_States   | scalable | UNIFORM\_SUPERPOSITION      | 3      | 5         | 1.04        | 0.11       |
 
-The General Model shows stronger performance on scalable families (GHZ, Uniform Superposition), indicating better generalization to multi-qubit structures.
 
-The Fixed Model performs well on simple states (e.g., Bell State), but struggles with scalability.
+### Observation
 
-For Computational Basis States, the General Model significantly outperforms the Fixed Model, highlighting the advantage of curriculum learning with Absolute Learning Progress (ALP).
+- The General Model performs better on scalable states (GHZ, Uniform Superposition).
 
-So far, I can conclude that training with generalized states and ALP curriculum yields a more versatile model that adapts well to scalable quantum states, making it more suitable for larger quantum systems.
+- The Fixed Model shows strong performance on simple fixed states (Bell), but fails on scalability (Computational Basis State & GHZ).
+
+- For Computational Basis State, the General Model achieves positive reward, while the Fixed Model collapses.
+
+- Overall, curriculum learning with generalized states produces a more versatile agent, well-suited for larger quantum systems.
 
 ## Future Work
 
