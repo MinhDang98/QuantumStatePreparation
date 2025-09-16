@@ -1,164 +1,157 @@
-# Quantum State Preparation using Reinforcement Learning
+# Quantum State Preparation with Reinforcement Learning
 
-This project demonstrates how to use a Deep Q-Network (DQN) agent to find optimal quantum circuits for preparing specific target quantum states. The agent learns by interacting with a custom Gymnasium environment that simulates quantum circuit operations.
+This project implements a reinforcement learning (RL) framework for quantum state preparation using [Qiskit](https://qiskit.org/) and [Stable-Baselines3](https://stable-baselines3.readthedocs.io/). The goal is to train an agent to construct quantum circuits that prepare desired target states efficiently, under realistic hardware constraints.
+
 
 ## Features
 
-  * **Reinforcement Learning Agent:** Utilizes a Stable Baselines3 DQN agent to learn circuit construction.
-  * **Custom Quantum Environment:** A Gymnasium environment (`QuantumStatePreparation`) where actions correspond to applying quantum gates.
-  * **Multiple Target States:** Pre-defined target states including Bell states (Φ+, Ψ+), GHZ state, computational basis states, and uniform superposition.
-  * **Circuit Visualization:** Built circuits can be visualized using Qiskit's `draw` method.
-  * **GPU Support:** Configured for training on NVIDIA GPUs using PyTorch with CUDA, if available.
+- **Custom Gymnasium Environment**  
+  `QuantumStatePreparation` simulates the process of preparing quantum states with a restricted gate set (H, CX, X, Z). Observations include Pauli expectations and meta information such as fidelity and remaining gates.
+
+- **Target States**  
+  - `TargetState`: Fixed small states (Bell states, GHZ, Ψ+, computational basis, uniform superposition).  
+  - `GeneralTargetState`: Scalable families of states (GHZ(n), uniform superposition(n)).
+
+- **Reinforcement Learning Agent**  
+  The `QuantumnAgent` class manages training and evaluation using Maskable PPO from `sb3-contrib`. Supports both:
+  - Standard training.
+  - ALP-based curriculum learning via `ALPBandTeacher`.
+
+- **Curriculum Learning**  
+  Tasks are sampled dynamically based on Absolute Learning Progress (ALP). This balances training difficulty and accelerates convergence.
+
+- **Benchmarking**  
+  Benchmark module allows evaluation across both fixed and scalable target states, measuring fidelity, gate efficiency, and learning performance.
+
 
 ## Project Structure
 
-  * `agent.py`: Contains the `QuantumnAgent` class, which handles the DQN model setup, training, evaluation, and circuit building.
-  * `quantum_state_preparation.py`: Defines the `TargetState` and `QuantumStatePreparation` (Gymnasium environment) classes, which include the quantum state simulation, action space definition, and reward function.
-  * `main.ipynb`: A Jupyter Notebook demonstrating how to use the `QuantumnAgent` to train a model and build circuits for various target states.
-  * `requirements.txt`: Lists all necessary Python dependencies for the project.
-
-## Setup and Installation
-
-1.  **Clone the repository (if applicable):**
-
-    ```bash
-    git clone <your-repository-url>
-    cd <your-project-directory>
-    ```
-
-2.  **Create and activate a virtual environment (recommended):**
-
-    ```bash
-    python -m venv venv
-    # On Windows:
-    .\venv\Scripts\activate
-    # On macOS/Linux:
-    source venv/bin/activate
-    ```
-
-3.  **Install dependencies from `requirements.txt`:**
-    This command will install all required libraries, including `numpy`, `gymnasium`, `stable-baselines3[extra]`, `qiskit`, `matplotlib`, and `torch`.
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-    **Note on PyTorch (torch):** The `requirements.txt` will install a CPU-only version of PyTorch by default. If you intend to use a GPU, you should follow the specific instructions on the official PyTorch website to install the CUDA-enabled version *after* installing from `requirements.txt` (or before, if you prefer to manage it manually). Visit [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/) and select your specific CUDA version.
-
-    For example, for pip and CUDA 11.8:
-
-    ```bash
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-    ```
-
-4.  **Verify GPU setup (optional):**
-    Open a Python interpreter or a Jupyter cell and run:
-
-    ```python
-    import torch
-    print(torch.cuda.is_available())
-    if torch.cuda.is_available():
-        print(torch.cuda.device_count())
-        print(torch.cuda.get_device_name(0))
-    ```
-
-    This should output `True` if your GPU is detected and available to PyTorch.
-
-## Usage
-
-The primary way to interact with this project is through the `main.ipynb` Jupyter Notebook.
-
-1.  **Start Jupyter Notebook:**
-
-    ```bash
-    jupyter notebook
-    ```
-
-2.  **Open `main.ipynb`**
-
-3.  **Run the cells:**
-
-      * **Import necessary libraries:** The first cell imports all required modules.
-      * **Define Target State:** Instantiate a `TargetState` object by choosing one of the pre-defined target states from `TargetStateName`.
-        ```python
-        from libs.quantum_state_preparation import TargetState, TargetStateName
-        target_state = TargetState(targetStateName=TargetStateName.BELL_STATE)
-        ```
-      * **Initialize and Train the Agent:** Create a `QuantumnAgent` instance, passing your chosen `target_state` and training parameters. The agent will automatically start training upon initialization.
-        ```python
-        from libs.agent import QuantumnAgent
-        agent = QuantumnAgent(target_state,
-                              total_timesteps=8000,
-                              eval_frequency=1000, # Example values, adjust as needed
-                              eval_episode=10,
-                              verbose=0) # Set to 1 for more training logs
-        ```
-        The `device` used for training (CPU or CUDA) will be printed during agent initialization.
-      * **Build and Draw the Circuit:** After training, you can use the `agent.build_circuit()` method to generate a Qiskit `QuantumCircuit` that attempts to prepare the target state.
-        ```python
-        qc = agent.build_circuit()
-        if qc:
-            # Print ASCII drawing
-            print(qc.draw())
-            # Draw using Matplotlib for better visualization
-            import matplotlib.pyplot as plt
-            qc.draw(output='mpl')
-            plt.show() # Crucial for showing plot in scripts/some Jupyter setups
-        else:
-            print("Failed to build circuit.")
-        ```
-
-### Example Target States:
-
-You can switch the `targetStateName` to prepare different states:
-
-```python
-from libs.quantum_state_preparation import TargetState, TargetStateName
-import numpy as np
-
-# Bell State (|Φ+>)
-bell_state_target = TargetState(targetStateName=TargetStateName.BELL_STATE)
-
-# GHZ State for 3 Qubits (|GHZ>)
-# Note: Ensure `num_qubits` is set to 3 for GHZ_STATE in quantum_state_preparation.py
-# The action space is automatically generated based on num_qubits.
-ghz_state_target = TargetState(targetStateName=TargetStateName.GHZ_STATE)
-
-# Another Bell State (|Ψ+>)
-bell_state_psi_target = TargetState(targetStateName=TargetStateName.BELL_STATE_PSI)
-
-# Computational Basis State (|10>) for 2 Qubits
-comp_basis_target = TargetState(targetStateName=TargetStateName.COMPUTATIONAL_BASIS_STATE)
-
-# Uniform Superposition for 2 Qubits
-uniform_superposition_target = TargetState(targetStateName=TargetStateName.UNIFORM_SUPERPOSITION)
+```
+libs/
+├── agent.py                     # RL agent management (training, evaluation, inference)
+├── alp.py                       # ALP-based curriculum teacher and wrapper
+├── quantum_state_preparation.py # Custom Gymnasium environment
+├── target_state.py              # Definitions for TargetState and GeneralTargetState
+├── utils.py                     # Utility functions (e.g., log cleaning)
+main.py                          # Code example
+./run_qiskit.bat                 # To run the full pipeline
 ```
 
-## Key Components
+## Getting Started
 
-  * **`TargetState` Class:**
+### Installation
 
-      * Initializes parameters for a specific target quantum state, including `num_qubits`, `max_gates` allowed for its preparation, and the `target_vector` (the desired quantum state in vector form).
-      * Pre-defines common quantum states (Bell, GHZ, etc.).
+Clone the repository and install dependencies:
 
-  * **`QuantumStatePreparation` Class (Gymnasium Environment):**
+```
+pip install -r requirements.txt
+```
 
-      * **Observation Space:** Represents the current quantum state as a flattened array of real and imaginary parts of the statevector.
-      * **Action Space:** Dynamically generated based on `num_qubits`, including single-qubit gates (H, X, Z) and two-qubit CNOT (CX) gates between all pairs of qubits.
-      * **`reset()`:** Initializes the circuit and state to `|0...0⟩`.
-      * **`step(action)`:** Applies the chosen gate to the quantum circuit (`self.qc`) and evolves the current statevector (`self.current_circuit_state`). It calculates the reward, and determines if the episode is `terminated` (target state reached) or `truncated` (max gates exceeded).
-      * **`reward()`:** Calculates fidelity between the current and target state, providing rewards for increased fidelity and penalties for reaching `max_gates`.
+Recommended tools for managing dependencies:
+- `pip freeze > requirements.txt` (all installed packages).
+- `pipreqs ./ --force` (only required packages from imports).
 
-  * **`QuantumnAgent` Class:**
 
-      * **`__init__`:** Sets up the environment, Stable Baselines3 DQN model, callbacks, and initiates training. Automatically detects and uses GPU (`cuda`) if available.
-      * **`set_up_model()`:** Configures the DQN model with a Multi-Layer Perceptron policy and specifies the `device` for training.
-      * **`train_model()`:** Executes the training loop for a specified number of `total_timesteps`.
-      * **`build_circuit()`:** Loads the best-trained model and uses it to construct a `QuantumCircuit` object for the target state.
 
-## Customization and Extension
+### Training
 
-  * **Add New Target States:** In `quantum_state_preparation.py`, you can add new `elif` conditions within the `TargetState` `__init__` method to define more target quantum vectors. Remember to specify `num_qubits` and a reasonable `max_gates` for each new state.
-  * **Modify Action Set:** The `generate_action_state` function in `quantum_state_preparation.py` can be modified to include more quantum gates (e.g., Ry, Rz, SWAP, Toffoli) or different qubit interactions.
-  * **Adjust RL Parameters:** In `agent.py`, you can experiment with different DQN hyperparameters (e.g., `learning_rate`, `buffer_size`, `exploration_fraction`, `net_arch`) to optimize training performance.
-  * **Change RL Algorithm:** You can easily switch from DQN to other Stable Baselines3 algorithms like PPO, A2C, etc., by changing `from stable_baselines3 import DQN` to the desired algorithm and adjusting parameters accordingly.
+Run training with a fixed set of target states:
+
+```python
+from libs.target_state import TargetState, TargetStateName
+from libs.agent import QuantumnAgent
+
+target_states = [
+    TargetState(TargetStateName.BELL_STATE),
+    TargetState(TargetStateName.GHZ_STATE),
+]
+
+agent = QuantumnAgent(
+    model_folder_name="QSP_RL",
+    target_states_list=target_states,
+    total_timesteps=100000,
+    eval_frequency=5000,
+    eval_episode=20,
+    training_mode=True
+)
+```
+
+To use ALP-based curriculum learning:
+
+```python
+agent = QuantumnAgent(
+    model_folder_name="QSP_RL_ALP",
+    target_states_list=target_states,
+    total_timesteps=100000,
+    eval_frequency=5000,
+    eval_episode=20,
+    training_mode=True,
+    use_alp=True
+)
+```
+
+### Testing a Trained Model
+
+```python
+from libs.target_state import TargetState, TargetStateName
+from libs.agent import QuantumnAgent
+
+agent = QuantumnAgent(model_folder_name="QSP_RL", training_mode=False)
+agent.build_circuit(TargetState(TargetStateName.BELL_STATE))
+```
+
+## Benchmarking
+
+You can benchmark your trained models across suites of target states:
+
+```python
+from libs.target_state import TargetState, GeneralTargetState, TargetStateName
+from libs.agent import QuantumnAgent
+from libs.benchmark import Benchmark
+
+agent = QuantumnAgent(model_folder_name="QSP_RL", training_mode=False)
+bm = Benchmark(agent)
+
+bm.add_suite("fixed", [
+    TargetState(TargetStateName.BELL_STATE),
+    TargetState(TargetStateName.GHZ_STATE),
+])
+
+bm.add_suite("scalable", [
+    GeneralTargetState(TargetStateName.GHZ_STATE, num_qubits=4),
+    GeneralTargetState(TargetStateName.UNIFORM_SUPERPOSITION, num_qubits=5),
+])
+
+results = bm.run_all(n_eval_episodes=20)
+```
+
+## Results
+
+I benchmarked two training strategies:
+
+- Fixed Target States: agent trained only on predefined fixed states.
+
+- General Target States: agent trained on scalable, generalized states (e.g., GHZ with 2–4 qubits, uniform superposition with 2–4 qubits).
+
+![Agent Benchmark Performance](./benchmark_plot.png)
+
+The agents were evaluated on a benchmark suite including GHZ(3), Uniform Superposition(3), Bell State (Ψ⁺), and Computational Basis State.
+
+The General Model shows stronger performance on scalable families (GHZ, Uniform Superposition), indicating better generalization to multi-qubit structures.
+
+The Fixed Model performs well on simple states (e.g., Bell State), but struggles with scalability.
+
+For Computational Basis States, the General Model significantly outperforms the Fixed Model, highlighting the advantage of curriculum learning with Absolute Learning Progress (ALP).
+
+So far, I can conclude that training with generalized states and ALP curriculum yields a more versatile model that adapts well to scalable quantum states, making it more suitable for larger quantum systems.
+
+## Future Work
+
+- Extend support for more quantum gates and hardware constraints.
+- Add benchmarking for circuit depth and gate counts.
+- Investigate transfer learning to larger systems.
+- Explore multi-agent and hybrid quantum-classical approaches.
+
+## License
+
+This project is released under the MIT License.

@@ -104,6 +104,14 @@ class QuantumnAgent():
 			self.max_env_qubits = config.get('max_env_qubits')
 			self.max_env_gates = config.get('max_env_gates')
 
+			best_model_path = os.path.join(self.model_dir, MODEL_NAME)
+			if not os.path.exists(best_model_path):
+				print(f"[Error] No best model found at {best_model_path}")
+				return None
+
+			print(f"[Info] Loading trained model from {best_model_path}")
+			self.model = MaskablePPO.load(best_model_path)
+
 	def save_env_config(self, path):
 		"""
 		Saves the environment configuration to a JSON file.
@@ -323,9 +331,7 @@ class QuantumnAgent():
 			tb_log_name=f"PPO_ALP"
 		)
 
-	def build_circuit(self, 
-				   folder_name: str,
-				   target_state: Union[TargetState, GeneralTargetState]):
+	def build_circuit(self, target_state: Union[TargetState, GeneralTargetState]):
 		"""
 		Builds a quantum circuit for a given target state using the trained model.
 
@@ -336,11 +342,6 @@ class QuantumnAgent():
 		Returns:
 			The quantum circuit if successful, otherwise None.
 		"""
-		best_model_path = os.path.join(self.model_dir + folder_name, MODEL_NAME)
-		if not os.path.exists(best_model_path):
-			print(f"[Error] No best model found at {best_model_path}")
-			return None
-
 		# Direct env (no VecEnv) for inference
 		eval_env = QuantumStatePreparation(
 			target_states_list=[target_state],
@@ -348,15 +349,12 @@ class QuantumnAgent():
 			max_env_gates=self.max_env_gates
 		)
 
-		print(f"[Info] Loading trained model from {best_model_path}")
-		best_model = MaskablePPO.load(best_model_path)
-
 		obs, info = eval_env.reset()
 		steps, done = 0, False
 
 		while not done and steps < target_state.max_gates:
 			mask = eval_env.compute_valid_action_mask()
-			action, _ = best_model.predict(obs, deterministic=True, action_masks=mask)
+			action, _ = self.model.predict(obs, deterministic=True, action_masks=mask)
 			obs, reward, terminated, truncated, info_eval = eval_env.step(action)
 			done = terminated or truncated
 			steps += 1
