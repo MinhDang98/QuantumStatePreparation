@@ -47,12 +47,6 @@ Clone the repository and install dependencies:
 pip install -r requirements.txt
 ```
 
-Recommended tools for managing dependencies:
-- `pip freeze > requirements.txt` (all installed packages).
-- `pipreqs ./ --force` (only required packages from imports).
-
-
-
 ### Training
 
 Run training with a fixed set of target states:
